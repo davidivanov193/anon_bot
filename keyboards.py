@@ -49,9 +49,9 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def sender_after_send_keyboard(recipient_id: int) -> InlineKeyboardMarkup:
+def sender_after_send_keyboard(recipient_token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN.WRITE, callback_data=f"send_again:{recipient_id}")],
+        [InlineKeyboardButton(text=BTN.WRITE, callback_data=f"send_again:{recipient_token}")],
         *_footer_buttons(),
     ])
 
@@ -59,7 +59,7 @@ def sender_after_send_keyboard(recipient_id: int) -> InlineKeyboardMarkup:
 def reply_keyboard(message_id: int, sender_id: int, rating_avg: float) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text=BTN.REPLY, callback_data=f"reply:{message_id}")],
-        [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{sender_id}")],
+        [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{message_id}")],
     ]
     if rating_avg < 2.0:
         buttons.insert(0, [InlineKeyboardButton(
@@ -75,10 +75,10 @@ def copy_link_keyboard(link: str) -> InlineKeyboardMarkup:
     ])
 
 
-def reply_after_reply_keyboard(sender_id: int, message_id: int) -> InlineKeyboardMarkup:
+def reply_after_reply_keyboard(sender_token: str, message_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN.WRITE, callback_data=f"send_again:{sender_id}")],
-        [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{sender_id}")],
+        [InlineKeyboardButton(text=BTN.WRITE, callback_data=f"send_again:{sender_token}")],
+        [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{message_id}")],
         [InlineKeyboardButton(text=BTN.RATE,  callback_data=f"rate:{message_id}")],
         *_footer_buttons(),
     ])
@@ -98,10 +98,10 @@ def rating_keyboard(message_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def confirm_send_keyboard(recipient_id: int) -> InlineKeyboardMarkup:
+def confirm_send_keyboard(recipient_token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, отправить", callback_data=f"confirm_send:{recipient_id}"),
+            InlineKeyboardButton(text="✅ Да, отправить", callback_data=f"confirm_send:{recipient_token}"),
             InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_send"),
         ],
     ])
@@ -109,12 +109,12 @@ def confirm_send_keyboard(recipient_id: int) -> InlineKeyboardMarkup:
 
 def unban_list_keyboard(ban_list: list) -> InlineKeyboardMarkup:
     buttons = []
-    for uid in ban_list:
+    for ban in ban_list:
+        preview = ban["last_message"] if ban["last_message"] else "нет текста"
         buttons.append([InlineKeyboardButton(
-            text=f"Разbanить {uid}",
-            callback_data=f"unban_user:{uid}"
+            text=f"Разбанить · «{preview}»",
+            callback_data=f"unban:{ban['token']}"
         )])
-    buttons.append([InlineKeyboardButton(text="✏️ Ввести вручную", callback_data="unban_manual")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -126,22 +126,18 @@ def support_category_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def support_action_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
+def owner_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Ответить", callback_data=f"support_reply:{ticket_id}")],
-        [InlineKeyboardButton(text="➕ Дополнить", callback_data=f"support_append:{ticket_id}")],
-        [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"support_edit:{ticket_id}")],
         [InlineKeyboardButton(text=BTN.THANK, callback_data=f"support_thank:{ticket_id}")],
     ])
 
 
-def ban_keyboard(user_id: int) -> InlineKeyboardMarkup:
+def user_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN.BAN, callback_data=f"ban:{user_id}")],
+        [InlineKeyboardButton(text=BTN.APPEND, callback_data=f"support_append:{ticket_id}")],
+        [InlineKeyboardButton(text=BTN.EDIT, callback_data=f"support_edit:{ticket_id}")],
     ])
 
 
-def unban_keyboard(user_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN.UNBAN, callback_data=f"unban_user:{user_id}")],
-    ])
+

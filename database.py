@@ -1,4 +1,6 @@
 import os
+import secrets
+import string
 from typing import Optional, Tuple, List
 
 import aiosqlite
@@ -18,6 +20,7 @@ async def init_db() -> None:
                 username TEXT,
                 full_name TEXT,
                 rating_avg REAL DEFAULT 4.0,
+                token TEXT UNIQUE,
                 created_at TEXT DEFAULT (datetime('now'))
             )
         """)
@@ -47,7 +50,8 @@ async def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 owner_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
+                banned_at TEXT DEFAULT (datetime('now')),
+                last_message TEXT,
                 UNIQUE(owner_id, user_id)
             )
         """)
@@ -78,24 +82,53 @@ async def init_db() -> None:
         await db.commit()
 
 
+def generate_token() -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(8))
+
+
 async def migrate_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("PRAGMA table_info(users)")
-        columns = [row[1] for row in await cursor.fetchall()]
-        if "rating_avg" not in columns:
+        try:
             await db.execute("ALTER TABLE users ADD COLUMN rating_avg REAL DEFAULT 4.0")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN token TEXT")
+            await db.commit()
+        except Exception:
+            pass
+
+        async with db.execute("SELECT user_id FROM users WHERE token IS NULL") as cursor:
+            rows = await cursor.fetchall()
+        for (uid,) in rows:
+            await db.execute("UPDATE users SET token = ? WHERE user_id = ?",
+                             (generate_token(), uid))
         await db.commit()
+
+        for column, definition in [
+            ("banned_at", "TEXT DEFAULT (datetime('now'))"),
+            ("last_message", "TEXT"),
+        ]:
+            try:
+                await db.execute(f"ALTER TABLE bans ADD COLUMN {column} {definition}")
+                await db.commit()
+            except Exception:
+                pass
 
 
 async def add_user(user_id: int, username: Optional[str], full_name: str) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
+        token = generate_token()
         await db.execute(
-            """INSERT INTO users (user_id, username, full_name)
-               VALUES (?, ?, ?)
+            """INSERT INTO users (user_id, username, full_name, token)
+               VALUES (?, ?, ?, ?)
                ON CONFLICT(user_id) DO UPDATE SET
                  username = excluded.username,
                  full_name = excluded.full_name""",
-            (user_id, username, full_name),
+            (user_id, username, full_name, token),
         )
         await db.commit()
 
@@ -114,6 +147,15 @@ async def get_user_by_username(username: str) -> Optional[aiosqlite.Row]:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM users WHERE username = ?", (username,)
+        ) as cursor:
+            return await cursor.fetchone()
+
+
+async def get_user_by_token(token: str) -> Optional[aiosqlite.Row]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM users WHERE token = ?", (token,)
         ) as cursor:
             return await cursor.fetchone()
 
@@ -216,15 +258,16 @@ async def get_global_stats() -> dict:
         }
 
 
-async def add_ban(owner_id: int, user_id: int) -> None:
+async def add_ban(owner_id: int, user_id: int, last_message: str = None) -> None:
+    truncated = (last_message[:20] + "...") if last_message and len(last_message) > 20 else last_message
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO bans (owner_id, user_id) VALUES (?, ?)",
-            (owner_id, user_id),
+            "INSERT OR IGNORE INTO bans (owner_id, user_id, last_message) VALUES (?, ?, ?)",
+            (owner_id, user_id, truncated),
         )
         await db.execute(
-            "INSERT OR IGNORE INTO bans (owner_id, user_id) VALUES (?, ?)",
-            (user_id, owner_id),
+            "INSERT OR IGNORE INTO bans (owner_id, user_id, last_message) VALUES (?, ?, ?)",
+            (user_id, owner_id, truncated),
         )
         await db.commit()
 
@@ -247,14 +290,27 @@ async def is_banned(owner_id: int, user_id: int) -> bool:
             return await cursor.fetchone() is not None
 
 
-async def get_ban_list(user_id: int) -> List[int]:
+async def get_ban_list(user_id: int) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT user_id FROM bans WHERE owner_id = ? UNION SELECT owner_id FROM bans WHERE user_id = ?",
-            (user_id, user_id),
-        ) as cursor:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT DISTINCT
+                CASE WHEN owner_id = ? THEN user_id ELSE owner_id END as banned_id,
+                last_message
+            FROM bans
+            WHERE owner_id = ? OR user_id = ?
+        """, (user_id, user_id, user_id)) as cursor:
             rows = await cursor.fetchall()
-            return [row[0] for row in rows]
+
+    result = []
+    for row in rows:
+        user = await get_user(row["banned_id"])
+        if user and user["token"]:
+            result.append({
+                "token": user["token"],
+                "last_message": row["last_message"],
+            })
+    return result
 
 
 async def add_rating(rater_id: int, rated_id: int, rating: int) -> bool:

@@ -22,7 +22,8 @@ from keyboards import (
     rating_keyboard,
     confirm_send_keyboard,
     support_category_keyboard,
-    support_action_keyboard,
+    owner_support_keyboard,
+    user_support_keyboard,
 )
 
 router = Router()
@@ -43,10 +44,6 @@ class ReplyState(StatesGroup):
     waiting_for_reply = State()
 
 
-class UnbanState(StatesGroup):
-    waiting_for_input = State()
-
-
 class SupportState(StatesGroup):
     waiting_for_message = State()
     waiting_for_append = State()
@@ -65,18 +62,7 @@ def _check_rate_limit(user_id: int) -> bool:
 def _sender_display(user) -> str:
     if user.username:
         return f"@{user.username}"
-    return f"[{user.full_name}](tg://user?id={user.id})"
-
-
-def _parse_username(text: str) -> Optional[str]:
-    text = text.strip()
-    if text.startswith("@"):
-        return text[1:]
-    if "t.me/" in text:
-        parts = text.split("t.me/")
-        if len(parts) > 1:
-            return parts[1].split("/")[0].split("?")[0]
-    return text
+    return user.full_name
 
 
 async def get_bot_username(bot: Bot):
@@ -87,8 +73,8 @@ async def get_bot_username(bot: Bot):
     return BOT_USERNAME
 
 
-def get_personal_link(user_id: int, bot_username: str) -> str:
-    return f"https://t.me/{bot_username}?start={user_id}"
+def get_personal_link(user_id: int, bot_username: str, token: str) -> str:
+    return f"https://t.me/{bot_username}?start={token}"
 
 
 async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
@@ -165,15 +151,14 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
 
     args = message.text.split()
 
-    if len(args) > 1 and args[1].isdigit():
-        recipient_id = int(args[1])
-
-        if recipient_id <= 0:
-            await message.answer(
-                "❌ Некорректный ID получателя.",
-                reply_markup=persistent_keyboard(),
-            )
+    if len(args) > 1:
+        token = args[1]
+        recipient = await db.get_user_by_token(token)
+        if not recipient:
+            await message.answer("❌ Ссылка недействительна.", reply_markup=persistent_keyboard())
             return
+
+        recipient_id = recipient["user_id"]
 
         if recipient_id == user.id:
             await message.answer(
@@ -189,14 +174,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             )
             return
 
-        recipient = await db.get_user(recipient_id)
-        if not recipient:
-            await message.answer(
-                "Получатель ещё не запускал бота. Попробуйте позже.",
-                reply_markup=persistent_keyboard(),
-            )
-            return
-
         rating_avg, _ = await db.get_user_rating(recipient_id)
         if rating_avg < 2.0:
             await state.update_data(recipient_id=recipient_id, rating_avg=rating_avg)
@@ -205,7 +182,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
                 f"⚠️ Получатель имеет низкий рейтинг ({rating_avg})\n"
                 f"Ваше сообщение может быть проигнорировано.\n\n"
                 f"Отправить сообщение?",
-                reply_markup=confirm_send_keyboard(recipient_id),
+                reply_markup=confirm_send_keyboard(token),
             )
             return
 
@@ -219,7 +196,9 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         return
 
     bot_username = await get_bot_username(bot)
-    link = get_personal_link(user.id, bot_username)
+    user_row = await db.get_user(user.id)
+    token = user_row["token"] if user_row else ""
+    link = get_personal_link(user.id, bot_username, token)
 
     await message.answer(
         f"👋 Привет! Я — бот для анонимных сообщений.\n\n"
@@ -267,34 +246,6 @@ async def cmd_allstats(message: Message):
     )
 
 
-@router.message(Command("banlist"))
-async def cmd_banlist(message: Message):
-    ban_list = await db.get_ban_list(message.from_user.id)
-    if not ban_list:
-        await message.answer("📋 Ваш список забаненных пуст.", reply_markup=persistent_keyboard())
-        return
-
-    lines = ["📋 Забаненные пользователи:"]
-    for uid in ban_list:
-        user = await db.get_user(uid)
-        name = _sender_display(user) if user else str(uid)
-        lines.append(f"• {name} — /unban {uid}")
-
-    await message.answer("\n".join(lines), reply_markup=persistent_keyboard())
-
-
-@router.message(Command("unban"))
-async def cmd_unban(message: Message):
-    args = message.text.split()
-    if len(args) < 2 or not args[1].isdigit():
-        await message.answer("Использование: /unban <user_id>", reply_markup=persistent_keyboard())
-        return
-
-    user_id = int(args[1])
-    await db.remove_ban(message.from_user.id, user_id)
-    await message.answer(f"✅ Пользователь {user_id} разблокирован.", reply_markup=persistent_keyboard())
-
-
 @router.message(SendState.confirming_low_rating)
 async def handle_confirm_low_rating(message: Message, state: FSMContext):
     text = message.text.lower()
@@ -314,13 +265,13 @@ async def handle_confirm_low_rating(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("confirm_send:"))
 async def callback_confirm_send(callback: CallbackQuery, state: FSMContext):
-    try:
-        recipient_id = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
+    token = callback.data.split(":")[1]
+    recipient = await db.get_user_by_token(token)
+    if not recipient:
         await callback.answer("Ошибка данных", show_alert=True)
         return
 
-    await state.update_data(recipient_id=recipient_id)
+    await state.update_data(recipient_id=recipient["user_id"])
     await state.set_state(SendState.waiting_for_message)
     await callback.message.edit_text(
         "Отправьте анонимное сообщение.\n"
@@ -416,13 +367,18 @@ async def _process_send(message: Message, state: FSMContext, bot: Bot, owner_id:
     )
 
     bot_username = await get_bot_username(bot)
-    sender_link = get_personal_link(user.id, bot_username)
+    sender_row = await db.get_user(user.id)
+    sender_token = sender_row["token"] if sender_row else ""
+    sender_link = get_personal_link(user.id, bot_username, sender_token)
+
+    recipient_row = await db.get_user(recipient_id)
+    recipient_token = recipient_row["token"] if recipient_row else ""
 
     await message.answer(
         "✅ Сообщение отправлено анонимно!\n\n"
         f"💡 Хотите получать анонимные сообщения?\n"
         f"Ваша ссылка: {sender_link}",
-        reply_markup=sender_after_send_keyboard(recipient_id),
+        reply_markup=sender_after_send_keyboard(recipient_token),
     )
 
     try:
@@ -434,19 +390,16 @@ async def _process_send(message: Message, state: FSMContext, bot: Bot, owner_id:
 
 @router.callback_query(F.data.startswith("send_again:"))
 async def callback_send_again(callback: CallbackQuery, state: FSMContext):
-    try:
-        recipient_id = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных", show_alert=True)
+    token = callback.data.split(":")[1]
+    recipient = await db.get_user_by_token(token)
+    if not recipient:
+        await callback.answer("Получатель недоступен", show_alert=True)
         return
+
+    recipient_id = recipient["user_id"]
 
     if await db.is_banned(recipient_id, callback.from_user.id):
         await callback.answer("❌ Вы заблокированы получателем.", show_alert=True)
-        return
-
-    recipient = await db.get_user(recipient_id)
-    if not recipient:
-        await callback.answer("Получатель более недоступен", show_alert=True)
         return
 
     await state.update_data(recipient_id=recipient_id)
@@ -463,7 +416,9 @@ async def callback_send_again(callback: CallbackQuery, state: FSMContext):
 async def callback_my_link(callback: CallbackQuery, bot: Bot):
     user = callback.from_user
     bot_username = await get_bot_username(bot)
-    link = get_personal_link(user.id, bot_username)
+    user_row = await db.get_user(user.id)
+    token = user_row["token"] if user_row else ""
+    link = get_personal_link(user.id, bot_username, token)
 
     await callback.message.edit_text(
         f"🔗 Твоя ссылка для анонимных сообщений:\n{link}",
@@ -476,7 +431,9 @@ async def callback_my_link(callback: CallbackQuery, bot: Bot):
 async def callback_get_my_link(callback: CallbackQuery, bot: Bot):
     user = callback.from_user
     bot_username = await get_bot_username(bot)
-    link = get_personal_link(user.id, bot_username)
+    user_row = await db.get_user(user.id)
+    token = user_row["token"] if user_row else ""
+    link = get_personal_link(user.id, bot_username, token)
 
     await callback.message.edit_text(
         f"🔗 Твоя ссылка для анонимных сообщений:\n{link}",
@@ -578,9 +535,11 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
 
             await bot.send_message(chat_id=sender_id, text=reply_text)
 
+            sender_row = await db.get_user(sender_id)
+            sender_token = sender_row["token"] if sender_row else ""
             await message.answer(
                 "✅ Ответ отправлен!",
-                reply_markup=reply_after_reply_keyboard(sender_id, message_id),
+                reply_markup=reply_after_reply_keyboard(sender_token, message_id),
             )
         except Exception as e:
             logging.error(f"Ошибка отправки ответа пользователю {sender_id}: {e}")
@@ -644,82 +603,61 @@ async def callback_rate_submit(callback: CallbackQuery, bot: Bot, owner_id: int)
 @router.callback_query(F.data.startswith("ban:"))
 async def callback_ban(callback: CallbackQuery):
     try:
-        user_id = int(callback.data.split(":")[1])
+        message_id = int(callback.data.split(":")[1])
     except (ValueError, IndexError):
         await callback.answer("Ошибка данных", show_alert=True)
         return
+
+    msg = await db.get_message(message_id)
+    if not msg:
+        await callback.answer("Сообщение не найдено", show_alert=True)
+        return
+
+    user_id = msg["sender_id"]
 
     if user_id == callback.from_user.id:
         await callback.answer("Нельзя забанить самого себя", show_alert=True)
         return
 
-    await db.add_ban(callback.from_user.id, user_id)
+    last_message = msg["text"]
+
+    await db.add_ban(callback.from_user.id, user_id, last_message)
     await callback.answer("Пользователь заблокирован", show_alert=True)
     await callback.message.answer("🚫 Пользователь заблокирован.")
 
 
 @router.callback_query(F.data == "unban_menu")
-async def callback_unban_menu(callback: CallbackQuery, state: FSMContext):
+async def callback_unban_menu(callback: CallbackQuery):
     ban_list = await db.get_ban_list(callback.from_user.id)
     if not ban_list:
         await callback.message.edit_text(
-            "📋 Ваш список забаненных пуст.",
+            "📋 Список забаненных пуст.",
             reply_markup=main_menu_keyboard(),
         )
         await callback.answer()
         return
 
     await callback.message.edit_text(
-        "Выберите пользователя для разбана:",
+        f"Забаненных: {len(ban_list)}\nВыберите для разбана:",
         reply_markup=unban_list_keyboard(ban_list),
     )
-    await state.set_state(UnbanState.waiting_for_input)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("unban_user:"))
-async def callback_unban_user(callback: CallbackQuery, state: FSMContext):
-    try:
-        user_id = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных", show_alert=True)
+@router.callback_query(F.data.startswith("unban:"))
+async def callback_unban(callback: CallbackQuery):
+    token = callback.data.split(":")[1]
+    target = await db.get_user_by_token(token)
+    if not target:
+        await callback.answer("Ошибка", show_alert=True)
         return
 
-    await db.remove_ban(callback.from_user.id, user_id)
-    await state.clear()
+    await db.remove_ban(callback.from_user.id, target["user_id"])
     await callback.message.edit_text(
-        f"✅ Пользователь {user_id} разблокирован.",
+        "✅ Пользователь разбанен.",
         reply_markup=main_menu_keyboard(),
     )
     await callback.answer()
-
-
-@router.callback_query(F.data == "unban_manual")
-async def callback_unban_manual(callback: CallbackQuery):
-    await callback.message.answer(
-        "Отправьте @username или ссылку t.me/username:"
-    )
-    await callback.answer()
-
-
-@router.message(UnbanState.waiting_for_input)
-async def process_unban_input(message: Message, state: FSMContext):
-    username = _parse_username(message.text)
-    if not username:
-        await message.answer("❌ Не удалось распознать username. Попробуйте @username или t.me/username")
-        return
-
-    user = await db.get_user_by_username(username)
-    if not user:
-        await message.answer(f"❌ Пользователь @{username} не найден в базе.")
-        return
-
-    await db.remove_ban(message.from_user.id, user["user_id"])
-    await state.clear()
-    await message.answer(
-        f"✅ Пользователь {_sender_display(user)} разблокирован.",
-        reply_markup=main_menu_keyboard(),
-    )
 
 
 @router.callback_query(F.data == "support_menu")
@@ -818,14 +756,14 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             chat_id=OWNER_ID,
             photo=media_file_id,
             caption=owner_text,
-            reply_markup=support_action_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(ticket_id),
         )
     elif media_type == "video":
         await bot.send_video(
             chat_id=OWNER_ID,
             video=media_file_id,
             caption=owner_text,
-            reply_markup=support_action_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(ticket_id),
         )
     elif media_type == "video_note":
         await bot.send_message(chat_id=OWNER_ID, text=owner_text)
@@ -836,18 +774,19 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
         await bot.send_message(
             chat_id=OWNER_ID,
             text="Действия:",
-            reply_markup=support_action_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(ticket_id),
         )
     else:
         await bot.send_message(
             chat_id=OWNER_ID,
             text=owner_text,
-            reply_markup=support_action_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(ticket_id),
         )
 
     await message.answer(
-        "✅ Обращение принято! Ожидайте ответа.",
-        reply_markup=persistent_keyboard(),
+        "✅ Обращение принято! Ожидайте ответа.\n\n"
+        "Вы можете дополнить или отредактировать обращение:",
+        reply_markup=user_support_keyboard(ticket_id),
     )
 
 

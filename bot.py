@@ -65,8 +65,6 @@ async def main():
         BotCommand(command="start", description="Начать"),
         BotCommand(command="stats", description="Статистика"),
         BotCommand(command="cancel", description="Отмена"),
-        BotCommand(command="banlist", description="Список забаненных"),
-        BotCommand(command="unban", description="Разбанить"),
     ])
 
     logging.info("Бот запущен!")
