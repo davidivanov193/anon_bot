@@ -896,7 +896,7 @@ async def process_support_append(message: Message, state: FSMContext, bot: Bot):
     if ticket:
         await bot.send_message(
             chat_id=OWNER_ID,
-            f"➕ Дополнение к обращению #{ticket_id}:\n\n{message.text}",
+            text=f"➕ Дополнение к обращению #{ticket_id}:\n\n{message.text}",
         )
 
     await message.answer(
