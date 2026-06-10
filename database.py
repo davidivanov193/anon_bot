@@ -378,6 +378,21 @@ async def get_ticket(ticket_id: int) -> Optional[aiosqlite.Row]:
             return await cursor.fetchone()
 
 
+async def get_unanswered_for_reminder(hours: int = 6) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT recipient_id, COUNT(*) as cnt,
+                      GROUP_CONCAT(sender_full_name, ', ') as senders
+               FROM messages
+               WHERE is_answered = 0
+                 AND created_at < datetime('now', ?)
+               GROUP BY recipient_id""",
+            (f"-{hours} hours",),
+        ) as cursor:
+            return await cursor.fetchall()
+
+
 async def purge_old_messages(days: int = 90) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
