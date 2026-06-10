@@ -934,7 +934,7 @@ async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
 
     await bot.send_message(
         chat_id=OWNER_ID,
-        f"✏️ Обращение #{ticket_id} отредактировано:\n\n{message.text}",
+        text=f"✏️ Обращение #{ticket_id} отредактировано:\n\n{message.text}",
     )
 
     await message.answer(
