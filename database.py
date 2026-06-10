@@ -79,6 +79,14 @@ async def init_db() -> None:
             )
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_support_user_category ON support_tickets(user_id, category, is_resolved)")
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS category_cooldowns (
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                cooldown_until TEXT NOT NULL,
+                PRIMARY KEY (user_id, category)
+            )
+        """)
         await db.commit()
 
 
@@ -117,6 +125,16 @@ async def migrate_db() -> None:
                 await db.commit()
             except Exception:
                 pass
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS category_cooldowns (
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                cooldown_until TEXT NOT NULL,
+                PRIMARY KEY (user_id, category)
+            )
+        """)
+        await db.commit()
 
 
 async def add_user(user_id: int, username: Optional[str], full_name: str) -> None:
@@ -432,6 +450,27 @@ async def get_ticket(ticket_id: int) -> Optional[aiosqlite.Row]:
             "SELECT * FROM support_tickets WHERE id = ?", (ticket_id,)
         ) as cursor:
             return await cursor.fetchone()
+
+
+async def set_category_cooldown(user_id: int, category: str, hours: int = 24) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT INTO category_cooldowns (user_id, category, cooldown_until)
+               VALUES (?, ?, datetime('now', ?))
+               ON CONFLICT(user_id, category) DO UPDATE SET
+                 cooldown_until = excluded.cooldown_until""",
+            (user_id, category, f"+{hours} hours"),
+        )
+        await db.commit()
+
+
+async def is_category_cooldown_active(user_id: int, category: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM category_cooldowns WHERE user_id = ? AND category = ? AND cooldown_until > datetime('now')",
+            (user_id, category),
+        ) as cursor:
+            return await cursor.fetchone() is not None
 
 
 async def get_unanswered_for_reminder(hours: int = 6) -> list:

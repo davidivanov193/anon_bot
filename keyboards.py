@@ -72,6 +72,7 @@ def reply_keyboard(message_id: int, sender_id: int, rating_avg: float) -> Inline
 def copy_link_keyboard(link: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN.COPY, copy_text=CopyTextButton(text=link))],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
     ])
 
 
@@ -123,19 +124,29 @@ def support_category_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🐛 Нашёл баг", callback_data="support:bug")],
         [InlineKeyboardButton(text="🚫 Жалоба на пользователя", callback_data="support:complaint")],
         [InlineKeyboardButton(text="💡 Предложение / идея", callback_data="support:idea")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
     ])
 
 
 def owner_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💬 Ответить", callback_data=f"support_reply:{ticket_id}")],
-        [InlineKeyboardButton(text=BTN.THANK, callback_data=f"support_thank:{ticket_id}")],
+    ])
+
+
+def owner_close_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"support_close:{ticket_id}:negative"),
+            InlineKeyboardButton(text="= Нейтрально", callback_data=f"support_close:{ticket_id}:neutral"),
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"support_close:{ticket_id}:positive"),
+        ],
     ])
 
 
 def user_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=BTN.APPEND, callback_data=f"support_append:{ticket_id}")],
+        [InlineKeyboardButton(text="✉️ Написать", callback_data=f"support_append:{ticket_id}")],
         [InlineKeyboardButton(text=BTN.EDIT, callback_data=f"support_edit:{ticket_id}")],
     ])
 

@@ -24,6 +24,7 @@ from keyboards import (
     support_category_keyboard,
     owner_support_keyboard,
     user_support_keyboard,
+    owner_close_keyboard,
 )
 
 router = Router()
@@ -510,8 +511,12 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             await bot.send_message(
                 chat_id=ticket["user_id"],
                 text=f"📩 Ответ поддержки:\n\n{message.text}",
+                reply_markup=user_support_keyboard(ticket_id=message_id),
             )
-            await message.answer("✅ Ответ отправлен!", reply_markup=persistent_keyboard())
+            await message.answer(
+                "✅ Ответ отправлен!",
+                reply_markup=owner_close_keyboard(ticket_id=message_id),
+            )
         except Exception as e:
             logging.error(f"Ошибка отправки ответа поддержки: {e}")
             await message.answer("Не удалось отправить ответ.")
@@ -672,6 +677,10 @@ async def callback_support_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("support:"))
 async def callback_support_category(callback: CallbackQuery, state: FSMContext):
     category = callback.data.split(":")[1]
+
+    if await db.is_category_cooldown_active(callback.from_user.id, category):
+        await callback.answer("⛔ Вы не можете писать в эту категорию 24 часа после отклонения.", show_alert=True)
+        return
 
     pending = await db.get_pending_ticket(callback.from_user.id, category)
     if pending:
@@ -882,10 +891,12 @@ async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
     )
 
 
-@router.callback_query(F.data.startswith("support_thank:"))
-async def callback_support_thank(callback: CallbackQuery, bot: Bot):
+@router.callback_query(F.data.startswith("support_close:"))
+async def callback_support_close(callback: CallbackQuery, bot: Bot):
     try:
-        ticket_id = int(callback.data.split(":")[1])
+        parts = callback.data.split(":")
+        ticket_id = int(parts[1])
+        resolution = parts[2]
     except (ValueError, IndexError):
         await callback.answer("Ошибка данных", show_alert=True)
         return
@@ -902,26 +913,26 @@ async def callback_support_thank(callback: CallbackQuery, bot: Bot):
 
     deltas = {"bug": 0.2, "complaint": 0.1, "idea": 0.1}
     delta = deltas.get(category, 0.1)
-    await db.adjust_rating(user_id, delta)
 
-    thank_messages = {
-        "bug": "Спасибо за найденный баг! Мы уже работаем над исправлением.",
-        "complaint": "Спасибо за обращение! Мы рассмотрим вашу жалобу.",
-        "idea": "Спасибо за предложение! Мы ценим ваш вклад в развитие бота.",
-    }
+    if resolution == "positive":
+        await db.adjust_rating(user_id, delta)
+        text = f"✅ Обращение #{ticket_id} принято. Рейтинг +{delta}"
+        user_text = "✅ Ваше обращение принято! Спасибо за обратную связь."
+    elif resolution == "negative":
+        await db.adjust_rating(user_id, -delta)
+        await db.set_category_cooldown(user_id, category, hours=24)
+        text = f"❌ Обращение #{ticket_id} отклонено. Рейтинг -{delta}, кулдаун 24ч"
+        user_text = "❌ Ваше обращение отклонено. Вы не сможете писать в эту категорию 24 часа."
+    else:
+        text = f"= Обращение #{ticket_id} закрыто нейтрально."
+        user_text = "📩 Ваше обращение закрыто. Спасибо за обращение!"
 
     try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=f"📩 Ответ поддержки:\n\n{thank_messages.get(category, 'Спасибо за обращение!')}\n\n"
-                 f"Ваш рейтинг повышен на {delta} ⭐",
-        )
+        await bot.send_message(chat_id=user_id, text=user_text)
     except Exception:
         pass
 
-    await callback.message.edit_text(
-        f"✅ Спасибо отправлено пользователю. Тикет #{ticket_id} закрыт.",
-    )
+    await callback.message.edit_text(text)
     await callback.answer()
 
 
