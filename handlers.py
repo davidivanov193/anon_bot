@@ -470,6 +470,9 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
 
         sender_id = msg["sender_id"]
 
+        sender_row = await db.get_user(sender_id)
+        sender_token = sender_row["token"] if sender_row else ""
+
         try:
             reply_text = f"📨 Ответ на ваше анонимное сообщение:\n\n{message.text}"
 
