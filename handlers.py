@@ -474,13 +474,18 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             if replier.id != owner_id:
                 reply_text += f"\n\n🔍 Ответил: {_sender_display(replier)}"
 
-            await bot.send_message(chat_id=sender_id, text=reply_text)
+            replier_row = await db.get_user(replier.id)
+            replier_token = replier_row["token"] if replier_row else ""
 
-            sender_row = await db.get_user(sender_id)
-            sender_token = sender_row["token"] if sender_row else ""
+            await bot.send_message(
+                chat_id=sender_id,
+                text=reply_text,
+                reply_markup=reply_after_reply_keyboard(replier_token, message_id),
+            )
+
             await message.answer(
                 "✅ Ответ отправлен!",
-                reply_markup=reply_after_reply_keyboard(sender_token, message_id),
+                reply_markup=reply_after_reply_keyboard(replier_token, message_id),
             )
         except Exception as e:
             logging.error(f"Ошибка отправки ответа пользователю {sender_id}: {e}")
