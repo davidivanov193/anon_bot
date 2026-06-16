@@ -55,10 +55,11 @@ def sender_after_send_keyboard(recipient_token: str) -> InlineKeyboardMarkup:
     ])
 
 
-def reply_keyboard(message_id: int, sender_id: int) -> InlineKeyboardMarkup:
+def reply_keyboard(message_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN.REPLY, callback_data=f"reply:{message_id}")],
         [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{message_id}")],
+        [InlineKeyboardButton(text=BTN.MENU,  callback_data="main_menu")],
     ])
 
 
@@ -97,9 +98,10 @@ def support_category_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def owner_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
+def owner_support_keyboard(ticket_id: int, status: str = "open") -> InlineKeyboardMarkup:
+    emoji = {"open": "🟡", "closed": "🟢", "blocked": "🔴"}.get(status, "🟡")
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Ответить", callback_data=f"support_reply:{ticket_id}")],
+        [InlineKeyboardButton(text=f"{emoji} Ответить", callback_data=f"support_reply:{ticket_id}")],
     ])
 
 

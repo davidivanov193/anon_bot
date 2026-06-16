@@ -63,6 +63,7 @@ async def init_db() -> None:
                 media_type TEXT,
                 media_file_id TEXT,
                 owner_message_id INTEGER,
+                status TEXT DEFAULT 'open',
                 is_resolved INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             )
@@ -111,6 +112,12 @@ async def migrate_db() -> None:
 
         try:
             await db.execute("ALTER TABLE support_tickets ADD COLUMN owner_message_id INTEGER")
+            await db.commit()
+        except Exception:
+            pass
+
+        try:
+            await db.execute("ALTER TABLE support_tickets ADD COLUMN status TEXT DEFAULT 'open'")
             await db.commit()
         except Exception:
             pass
@@ -356,6 +363,15 @@ async def update_ticket_owner_message_id(ticket_id: int, message_id: int) -> Non
         await db.execute(
             "UPDATE support_tickets SET owner_message_id = ? WHERE id = ?",
             (message_id, ticket_id),
+        )
+        await db.commit()
+
+
+async def update_ticket_status(ticket_id: int, status: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_tickets SET status = ? WHERE id = ?",
+            (status, ticket_id),
         )
         await db.commit()
 

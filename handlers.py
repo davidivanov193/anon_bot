@@ -91,7 +91,15 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             photo=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
+        )
+    elif media_type == "video":
+        caption = main_text if text else "💬 Анонимное сообщение (видео)"
+        await bot.send_video(
+            chat_id=recipient_id,
+            video=media_file_id,
+            caption=caption,
+            reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "audio":
         caption = main_text if text else "💬 Анонимное сообщение (аудио)"
@@ -99,7 +107,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             audio=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "voice":
         caption = main_text if text else "💬 Анонимное сообщение (голосовое)"
@@ -107,7 +115,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             voice=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "sticker":
         await bot.send_sticker(
@@ -117,7 +125,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
         await bot.send_message(
             chat_id=recipient_id,
             text="💬 Анонимное сообщение (стикер)",
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "document":
         caption = main_text if text else "💬 Анонимное сообщение (файл)"
@@ -125,13 +133,13 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             document=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
         )
     else:
         await bot.send_message(
             chat_id=recipient_id,
             text=main_text,
-            reply_markup=reply_keyboard(msg_id, sender_user.id),
+            reply_markup=reply_keyboard(msg_id),
         )
 
     if media_type in ("photo", "video", "video_note") and recipient_id != owner_id:
@@ -415,10 +423,6 @@ async def callback_reply(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Сообщение не найдено", show_alert=True)
         return
 
-    if msg["is_answered"]:
-        await callback.answer("На это сообщение уже отвечено", show_alert=True)
-        return
-
     await state.update_data(reply_message_id=message_id)
     await state.set_state(ReplyState.waiting_for_reply)
     await callback.message.answer("Введите ответ:")
@@ -465,7 +469,6 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             return
 
         sender_id = msg["sender_id"]
-        await db.mark_answered(message_id)
 
         try:
             reply_text = f"📨 Ответ на ваше анонимное сообщение:\n\n{message.text}"
@@ -485,7 +488,7 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
 
             await message.answer(
                 "✅ Ответ отправлен!",
-                reply_markup=reply_after_reply_keyboard(replier_token, message_id),
+                reply_markup=reply_after_reply_keyboard(sender_token, message_id),
             )
         except Exception as e:
             logging.error(f"Ошибка отправки ответа пользователю {sender_id}: {e}")
@@ -639,6 +642,14 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
         f"{text}"
     )
 
+    ticket_id = await db.add_support_ticket(
+        user_id=user.id,
+        category=category,
+        text=text,
+        media_type=media_type,
+        media_file_id=media_file_id,
+    )
+
     owner_msg = None
 
     if media_type == "photo":
@@ -646,41 +657,34 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             chat_id=OWNER_ID,
             photo=media_file_id,
             caption=owner_text,
-            reply_markup=owner_support_keyboard(0),
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
         )
     elif media_type == "video":
         owner_msg = await bot.send_video(
             chat_id=OWNER_ID,
             video=media_file_id,
             caption=owner_text,
-            reply_markup=owner_support_keyboard(0),
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
         )
     elif media_type == "video_note":
-        await bot.send_message(chat_id=OWNER_ID, text=owner_text)
         await bot.send_video_note(
             chat_id=OWNER_ID,
             video_note=media_file_id,
         )
         owner_msg = await bot.send_message(
             chat_id=OWNER_ID,
-            text="Действия:",
-            reply_markup=owner_support_keyboard(0),
+            text=owner_text,
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
         )
     else:
         owner_msg = await bot.send_message(
             chat_id=OWNER_ID,
             text=owner_text,
-            reply_markup=owner_support_keyboard(0),
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
         )
 
-    ticket_id = await db.add_support_ticket(
-        user_id=message.from_user.id,
-        category=category,
-        text=text,
-        media_type=media_type,
-        media_file_id=media_file_id,
-        owner_message_id=owner_msg.message_id if owner_msg else None,
-    )
+    if owner_msg:
+        await db.update_ticket_owner_message_id(ticket_id, owner_msg.message_id)
 
     await state.clear()
 
@@ -814,11 +818,13 @@ async def callback_support_close(callback: CallbackQuery, bot: Bot):
 
     if resolution == "block":
         await db.set_category_cooldown(user_id, category, hours=24)
-        text = f"🚫 Тикет #{ticket_id} закрыт + кулдаун 24ч"
-        user_text = "🚫 Ваше обращение закрыто. Вы не сможете писать в эту категорию 24 часа."
+        await db.update_ticket_status(ticket_id, "blocked")
+        text = f"🔴 Тикет #{ticket_id} заблокирован + кулдаун 24ч"
+        user_text = "🔴 Ваше обращение закрыто. Вы не сможете писать в эту категорию 24 часа."
     else:
-        text = f"🔒 Тикет #{ticket_id} закрыт."
-        user_text = "📩 Ваше обращение закрыто. Спасибо за обращение!"
+        await db.update_ticket_status(ticket_id, "closed")
+        text = f"🟢 Тикет #{ticket_id} закрыт."
+        user_text = "🟢 Ваше обращение закрыто. Спасибо за обращение!"
 
     try:
         await bot.send_message(chat_id=user_id, text=user_text)
