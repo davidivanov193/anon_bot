@@ -17,7 +17,6 @@ from keyboards import (
     reply_keyboard,
     copy_link_keyboard,
     persistent_keyboard,
-    reply_after_reply_keyboard,
     unban_list_keyboard,
     support_category_keyboard,
     owner_support_keyboard,
@@ -236,6 +235,10 @@ async def cmd_allstats(message: Message):
 
 @router.message(SendState.waiting_for_message, F.text)
 async def handle_text_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     await _process_send(message, state, bot, owner_id, text=message.text)
 
 
@@ -431,6 +434,11 @@ async def callback_reply(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ReplyState.waiting_for_reply, F.text)
 async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
+
     data = await state.get_data()
     message_id = data.get("reply_message_id")
     is_support = data.get("is_support_reply", False)
@@ -486,12 +494,12 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             await bot.send_message(
                 chat_id=sender_id,
                 text=reply_text,
-                reply_markup=reply_after_reply_keyboard(replier_token, message_id),
+                reply_markup=reply_keyboard(message_id),
             )
 
             await message.answer(
                 "✅ Ответ отправлен!",
-                reply_markup=reply_after_reply_keyboard(sender_token, message_id),
+                reply_markup=reply_keyboard(message_id),
             )
         except Exception as e:
             logging.error(f"Ошибка отправки ответа пользователю {sender_id}: {e}")
@@ -607,6 +615,11 @@ async def callback_support_category(callback: CallbackQuery, state: FSMContext):
 
 @router.message(SupportState.waiting_for_message)
 async def process_support_message(message: Message, state: FSMContext, bot: Bot):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
+
     data = await state.get_data()
     category = data.get("support_category")
 
@@ -728,6 +741,11 @@ async def callback_support_append(callback: CallbackQuery, state: FSMContext):
 
 @router.message(SupportState.waiting_for_append)
 async def process_support_append(message: Message, state: FSMContext, bot: Bot):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
+
     data = await state.get_data()
     ticket_id = data.get("append_ticket_id")
 
@@ -768,6 +786,11 @@ async def callback_support_edit(callback: CallbackQuery, state: FSMContext):
 
 @router.message(SupportState.waiting_for_edit)
 async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
+
     data = await state.get_data()
     ticket_id = data.get("edit_ticket_id")
 
