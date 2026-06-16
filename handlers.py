@@ -19,8 +19,6 @@ from keyboards import (
     persistent_keyboard,
     reply_after_reply_keyboard,
     unban_list_keyboard,
-    rating_keyboard,
-    confirm_send_keyboard,
     support_category_keyboard,
     owner_support_keyboard,
     user_support_keyboard,
@@ -38,7 +36,6 @@ RATE_PERIOD = 60
 
 class SendState(StatesGroup):
     waiting_for_message = State()
-    confirming_low_rating = State()
 
 
 class ReplyState(StatesGroup):
@@ -83,25 +80,18 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
                                  media_type: str = None, media_file_id: str = None):
     text = message.caption or message.text or ""
 
-    rating_avg, _ = await db.get_user_rating(sender_user.id)
-
     if recipient_id == owner_id:
         main_text = f"💬 Анонимное сообщение:\n\n{text}\n\n🔍 Отправитель: {_sender_display(sender_user)}"
     else:
         main_text = f"💬 Анонимное сообщение:\n\n{text}"
 
-    if rating_avg < 2.0:
-        main_text += f"\n\n⚠️ Сообщение от пользователя с низким рейтингом ({rating_avg})"
-
     if media_type == "photo":
         caption = main_text if text else "💬 Анонимное сообщение (фото)"
-        if rating_avg < 2.0 and not text:
-            caption += f"\n\n⚠️ Сообщение от пользователя с низким рейтингом ({rating_avg})"
         await bot.send_photo(
             chat_id=recipient_id,
             photo=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
     elif media_type == "audio":
         caption = main_text if text else "💬 Анонимное сообщение (аудио)"
@@ -109,7 +99,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             audio=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
     elif media_type == "voice":
         caption = main_text if text else "💬 Анонимное сообщение (голосовое)"
@@ -117,7 +107,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             voice=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
     elif media_type == "sticker":
         await bot.send_sticker(
@@ -127,7 +117,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
         await bot.send_message(
             chat_id=recipient_id,
             text="💬 Анонимное сообщение (стикер)",
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
     elif media_type == "document":
         caption = main_text if text else "💬 Анонимное сообщение (файл)"
@@ -135,14 +125,17 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             document=media_file_id,
             caption=caption,
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
     else:
         await bot.send_message(
             chat_id=recipient_id,
             text=main_text,
-            reply_markup=reply_keyboard(msg_id, sender_user.id, rating_avg),
+            reply_markup=reply_keyboard(msg_id, sender_user.id),
         )
+
+    if media_type in ("photo", "video", "video_note") and recipient_id != owner_id:
+        await _forward_media_to_owner(bot, message, media_type, media_file_id)
 
 
 @router.message(Command("start"))
@@ -172,18 +165,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             await message.answer(
                 "❌ Вы заблокированы получателем.",
                 reply_markup=persistent_keyboard(),
-            )
-            return
-
-        rating_avg, _ = await db.get_user_rating(recipient_id)
-        if rating_avg < 2.0:
-            await state.update_data(recipient_id=recipient_id, rating_avg=rating_avg)
-            await state.set_state(SendState.confirming_low_rating)
-            await message.answer(
-                f"⚠️ Получатель имеет низкий рейтинг ({rating_avg})\n"
-                f"Ваше сообщение может быть проигнорировано.\n\n"
-                f"Отправить сообщение?",
-                reply_markup=confirm_send_keyboard(token),
             )
             return
 
@@ -226,8 +207,7 @@ async def cmd_stats(message: Message):
         f"📊 Статистика:\n"
         f"📨 Отправлено: {stats['sent']}\n"
         f"📥 Получено: {stats['received']}\n"
-        f"🚫 Забанено: {stats['ban_count']}\n"
-        f"⭐ Рейтинг: {stats['rating_avg']} ({stats['rating_count']} оценок)",
+        f"🚫 Забанено: {stats['ban_count']}",
     )
 
 
@@ -242,51 +222,8 @@ async def cmd_allstats(message: Message):
         f"👥 Всего пользователей: {stats['total_users']}\n"
         f"📨 Всего сообщений: {stats['total_messages']}\n"
         f"🚫 Всего банов: {stats['total_bans']}\n"
-        f"⭐ Средний рейтинг: {stats['avg_rating']}\n"
         f"📩 Открытых тикетов: {stats['open_tickets']}",
     )
-
-
-@router.message(SendState.confirming_low_rating)
-async def handle_confirm_low_rating(message: Message, state: FSMContext):
-    text = message.text.lower()
-    if text in ("да", "отправить", "yes", "y"):
-        data = await state.get_data()
-        await state.update_data(recipient_id=data["recipient_id"])
-        await state.set_state(SendState.waiting_for_message)
-        await message.answer(
-            "Отправьте анонимное сообщение.\n"
-            "Можно: текст, фото, аудио, стикер, документ\n"
-            f"Максимум: {MAX_MESSAGE_LENGTH} слов"
-        )
-    else:
-        await state.clear()
-        await message.answer("❌ Отправка отменена.", reply_markup=persistent_keyboard())
-
-
-@router.callback_query(F.data.startswith("confirm_send:"))
-async def callback_confirm_send(callback: CallbackQuery, state: FSMContext):
-    token = callback.data.split(":")[1]
-    recipient = await db.get_user_by_token(token)
-    if not recipient:
-        await callback.answer("Ошибка данных", show_alert=True)
-        return
-
-    await state.update_data(recipient_id=recipient["user_id"])
-    await state.set_state(SendState.waiting_for_message)
-    await callback.message.edit_text(
-        "Отправьте анонимное сообщение.\n"
-        "Можно: текст, фото, аудио, стикер, документ\n"
-        f"Максимум: {MAX_MESSAGE_LENGTH} слов"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "cancel_send")
-async def callback_cancel_send(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("❌ Отправка отменена.")
-    await callback.answer()
 
 
 @router.message(SendState.waiting_for_message, F.text)
@@ -459,8 +396,7 @@ async def callback_stats(callback: CallbackQuery):
         f"📊 Статистика:\n"
         f"📨 Отправлено: {stats['sent']}\n"
         f"📥 Получено: {stats['received']}\n"
-        f"🚫 Забанено: {stats['ban_count']}\n"
-        f"⭐ Рейтинг: {stats['rating_avg']} ({stats['rating_count']} оценок)",
+        f"🚫 Забанено: {stats['ban_count']}",
     )
     await callback.answer()
 
@@ -551,58 +487,6 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             await message.answer("Не удалось отправить ответ. Возможно, пользователь заблокировал бота.")
 
     await state.clear()
-
-
-@router.callback_query(F.data.startswith("rate:"))
-async def callback_rate(callback: CallbackQuery):
-    try:
-        message_id = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных", show_alert=True)
-        return
-
-    await callback.message.answer(
-        "Оцените собеседника:",
-        reply_markup=rating_keyboard(message_id),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("rate_submit:"))
-async def callback_rate_submit(callback: CallbackQuery, bot: Bot, owner_id: int):
-    try:
-        parts = callback.data.split(":")
-        message_id = int(parts[1])
-        rating = int(parts[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных", show_alert=True)
-        return
-
-    msg = await db.get_message(message_id)
-    if not msg:
-        await callback.answer("Сообщение не найдено", show_alert=True)
-        return
-
-    rated_id = msg["sender_id"]
-    rater_id = callback.from_user.id
-
-    if rater_id == rated_id:
-        await callback.answer("Нельзя оценить самого себя", show_alert=True)
-        return
-
-    is_new = await db.add_rating(rater_id, rated_id, rating)
-
-    await callback.message.edit_text(f"⭐ Оценка: {rating} из 5")
-    await callback.answer()
-
-    if is_new:
-        try:
-            await bot.send_message(
-                chat_id=rated_id,
-                text=f"⭐ Вас оценили на {rating}",
-            )
-        except Exception:
-            pass
 
 
 @router.callback_query(F.data.startswith("ban:"))
@@ -737,16 +621,6 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
         media_type = "video_note"
         media_file_id = message.video_note.file_id
 
-    ticket_id = await db.add_support_ticket(
-        user_id=message.from_user.id,
-        category=category,
-        text=text,
-        media_type=media_type,
-        media_file_id=media_file_id,
-    )
-
-    await state.clear()
-
     category_names = {
         "bug": "🐛 Нашёл баг",
         "complaint": "🚫 Жалоба на пользователя",
@@ -760,19 +634,21 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
         f"{text}"
     )
 
+    owner_msg = None
+
     if media_type == "photo":
-        await bot.send_photo(
+        owner_msg = await bot.send_photo(
             chat_id=OWNER_ID,
             photo=media_file_id,
             caption=owner_text,
-            reply_markup=owner_support_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(0),
         )
     elif media_type == "video":
-        await bot.send_video(
+        owner_msg = await bot.send_video(
             chat_id=OWNER_ID,
             video=media_file_id,
             caption=owner_text,
-            reply_markup=owner_support_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(0),
         )
     elif media_type == "video_note":
         await bot.send_message(chat_id=OWNER_ID, text=owner_text)
@@ -780,17 +656,28 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             chat_id=OWNER_ID,
             video_note=media_file_id,
         )
-        await bot.send_message(
+        owner_msg = await bot.send_message(
             chat_id=OWNER_ID,
             text="Действия:",
-            reply_markup=owner_support_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(0),
         )
     else:
-        await bot.send_message(
+        owner_msg = await bot.send_message(
             chat_id=OWNER_ID,
             text=owner_text,
-            reply_markup=owner_support_keyboard(ticket_id),
+            reply_markup=owner_support_keyboard(0),
         )
+
+    ticket_id = await db.add_support_ticket(
+        user_id=message.from_user.id,
+        category=category,
+        text=text,
+        media_type=media_type,
+        media_file_id=media_file_id,
+        owner_message_id=owner_msg.message_id if owner_msg else None,
+    )
+
+    await state.clear()
 
     await message.answer(
         "✅ Обращение принято! Ожидайте ответа.\n\n"
@@ -880,10 +767,19 @@ async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
     await db.update_ticket_text(ticket_id, message.text or "")
     await state.clear()
 
-    await bot.send_message(
+    ticket = await db.get_ticket(ticket_id)
+    if ticket and ticket["owner_message_id"]:
+        try:
+            await bot.delete_message(chat_id=OWNER_ID, message_id=ticket["owner_message_id"])
+        except Exception:
+            pass
+
+    new_msg = await bot.send_message(
         chat_id=OWNER_ID,
-        text=f"✏️ Обращение #{ticket_id} отредактировано:\n\n{message.text}",
+        text=f"✏️ Обращение #{ticket_id} (отредактировано):\n\n{message.text}",
+        reply_markup=owner_close_keyboard(ticket_id),
     )
+    await db.update_ticket_owner_message_id(ticket_id, new_msg.message_id)
 
     await message.answer(
         "✅ Обращение отредактировано!",
@@ -911,20 +807,12 @@ async def callback_support_close(callback: CallbackQuery, bot: Bot):
     category = ticket["category"]
     user_id = ticket["user_id"]
 
-    deltas = {"bug": 0.2, "complaint": 0.1, "idea": 0.1}
-    delta = deltas.get(category, 0.1)
-
-    if resolution == "positive":
-        await db.adjust_rating(user_id, delta)
-        text = f"✅ Обращение #{ticket_id} принято. Рейтинг +{delta}"
-        user_text = "✅ Ваше обращение принято! Спасибо за обратную связь."
-    elif resolution == "negative":
-        await db.adjust_rating(user_id, -delta)
+    if resolution == "block":
         await db.set_category_cooldown(user_id, category, hours=24)
-        text = f"❌ Обращение #{ticket_id} отклонено. Рейтинг -{delta}, кулдаун 24ч"
-        user_text = "❌ Ваше обращение отклонено. Вы не сможете писать в эту категорию 24 часа."
+        text = f"🚫 Тикет #{ticket_id} закрыт + кулдаун 24ч"
+        user_text = "🚫 Ваше обращение закрыто. Вы не сможете писать в эту категорию 24 часа."
     else:
-        text = f"= Обращение #{ticket_id} закрыто нейтрально."
+        text = f"🔒 Тикет #{ticket_id} закрыт."
         user_text = "📩 Ваше обращение закрыто. Спасибо за обращение!"
 
     try:

@@ -18,7 +18,6 @@ class BTN:
     WRITE    = "✉️ Написать ещё"
     GET_LINK = "🔗 Получить ссылку"
     SUPPORT  = "📩 Поддержка"
-    RATE     = "⭐ Оценить"
     EDIT     = "✏️ Редактировать"
     APPEND   = "➕ Дополнить"
     THANK    = "🙏 Сказать спасибо"
@@ -56,17 +55,11 @@ def sender_after_send_keyboard(recipient_token: str) -> InlineKeyboardMarkup:
     ])
 
 
-def reply_keyboard(message_id: int, sender_id: int, rating_avg: float) -> InlineKeyboardMarkup:
-    buttons = [
+def reply_keyboard(message_id: int, sender_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN.REPLY, callback_data=f"reply:{message_id}")],
         [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{message_id}")],
-    ]
-    if rating_avg < 2.0:
-        buttons.insert(0, [InlineKeyboardButton(
-            text=f"⚠️ Низкий рейтинг ({rating_avg})",
-            callback_data="ignore"
-        )])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    ])
 
 
 def copy_link_keyboard(link: str) -> InlineKeyboardMarkup:
@@ -80,31 +73,7 @@ def reply_after_reply_keyboard(sender_token: str, message_id: int) -> InlineKeyb
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN.WRITE, callback_data=f"send_again:{sender_token}")],
         [InlineKeyboardButton(text=BTN.BAN,   callback_data=f"ban:{message_id}")],
-        [InlineKeyboardButton(text=BTN.RATE,  callback_data=f"rate:{message_id}")],
         *_footer_buttons(),
-    ])
-
-
-def rating_keyboard(message_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="1 ⭐", callback_data=f"rate_submit:{message_id}:1"),
-            InlineKeyboardButton(text="2 ⭐⭐", callback_data=f"rate_submit:{message_id}:2"),
-            InlineKeyboardButton(text="3 ⭐⭐⭐", callback_data=f"rate_submit:{message_id}:3"),
-        ],
-        [
-            InlineKeyboardButton(text="4 ⭐⭐⭐⭐", callback_data=f"rate_submit:{message_id}:4"),
-            InlineKeyboardButton(text="5 ⭐⭐⭐⭐⭐", callback_data=f"rate_submit:{message_id}:5"),
-        ],
-    ])
-
-
-def confirm_send_keyboard(recipient_token: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да, отправить", callback_data=f"confirm_send:{recipient_token}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_send"),
-        ],
     ])
 
 
@@ -136,11 +105,8 @@ def owner_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
 
 def owner_close_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"support_close:{ticket_id}:negative"),
-            InlineKeyboardButton(text="= Нейтрально", callback_data=f"support_close:{ticket_id}:neutral"),
-            InlineKeyboardButton(text="✅ Принять", callback_data=f"support_close:{ticket_id}:positive"),
-        ],
+        [InlineKeyboardButton(text="🔒 Закрыть тикет", callback_data=f"support_close:{ticket_id}:close")],
+        [InlineKeyboardButton(text="🚫 Заблокировать", callback_data=f"support_close:{ticket_id}:block")],
     ])
 
 
@@ -148,6 +114,7 @@ def user_support_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✉️ Написать", callback_data=f"support_append:{ticket_id}")],
         [InlineKeyboardButton(text=BTN.EDIT, callback_data=f"support_edit:{ticket_id}")],
+        [InlineKeyboardButton(text=BTN.MENU, callback_data="main_menu")],
     ])
 
 

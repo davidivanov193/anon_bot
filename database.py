@@ -1,7 +1,7 @@
 import os
 import secrets
 import string
-from typing import Optional, Tuple, List
+from typing import Optional, List
 
 import aiosqlite
 
@@ -19,7 +19,6 @@ async def init_db() -> None:
                 user_id INTEGER PRIMARY KEY,
                 username TEXT,
                 full_name TEXT,
-                rating_avg REAL DEFAULT 4.0,
                 token TEXT UNIQUE,
                 created_at TEXT DEFAULT (datetime('now'))
             )
@@ -56,17 +55,6 @@ async def init_db() -> None:
             )
         """)
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS ratings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rater_id INTEGER NOT NULL,
-                rated_id INTEGER NOT NULL,
-                rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
-                created_at TEXT DEFAULT (datetime('now')),
-                UNIQUE(rater_id, rated_id)
-            )
-        """)
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_ratings_rated ON ratings(rated_id)")
-        await db.execute("""
             CREATE TABLE IF NOT EXISTS support_tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -74,6 +62,7 @@ async def init_db() -> None:
                 text TEXT,
                 media_type TEXT,
                 media_file_id TEXT,
+                owner_message_id INTEGER,
                 is_resolved INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now'))
             )
@@ -98,12 +87,6 @@ def generate_token() -> str:
 async def migrate_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         try:
-            await db.execute("ALTER TABLE users ADD COLUMN rating_avg REAL DEFAULT 4.0")
-            await db.commit()
-        except Exception:
-            pass
-
-        try:
             await db.execute("ALTER TABLE users ADD COLUMN token TEXT")
             await db.commit()
         except Exception:
@@ -125,6 +108,12 @@ async def migrate_db() -> None:
                 await db.commit()
             except Exception:
                 pass
+
+        try:
+            await db.execute("ALTER TABLE support_tickets ADD COLUMN owner_message_id INTEGER")
+            await db.commit()
+        except Exception:
+            pass
 
         await db.execute("""
             CREATE TABLE IF NOT EXISTS category_cooldowns (
@@ -233,19 +222,10 @@ async def get_stats(user_id: int) -> dict:
         ) as cursor:
             ban_count = (await cursor.fetchone())[0]
 
-        async with db.execute(
-            "SELECT AVG(rating), COUNT(*) FROM ratings WHERE rated_id = ?", (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            rating_avg = row[0] if row[0] is not None else 4.0
-            rating_count = row[1]
-
         return {
             "sent": sent,
             "received": received,
             "ban_count": ban_count,
-            "rating_avg": round(rating_avg, 1),
-            "rating_count": rating_count,
         }
 
 
@@ -260,10 +240,6 @@ async def get_global_stats() -> dict:
         async with db.execute("SELECT COUNT(*) FROM bans") as cursor:
             total_bans = (await cursor.fetchone())[0]
 
-        async with db.execute("SELECT AVG(rating_avg) FROM users WHERE rating_avg != 4.0") as cursor:
-            row = await cursor.fetchone()
-            avg_rating = round(row[0], 1) if row[0] is not None else 4.0
-
         async with db.execute("SELECT COUNT(*) FROM support_tickets WHERE is_resolved = 0") as cursor:
             open_tickets = (await cursor.fetchone())[0]
 
@@ -271,7 +247,6 @@ async def get_global_stats() -> dict:
             "total_users": total_users,
             "total_messages": total_messages,
             "total_bans": total_bans,
-            "avg_rating": avg_rating,
             "open_tickets": open_tickets,
         }
 
@@ -331,71 +306,19 @@ async def get_ban_list(user_id: int) -> list:
     return result
 
 
-async def add_rating(rater_id: int, rated_id: int, rating: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT 1 FROM ratings WHERE rater_id = ? AND rated_id = ?",
-            (rater_id, rated_id),
-        )
-        is_new = await cursor.fetchone() is None
-
-        await db.execute(
-            "DELETE FROM ratings WHERE rater_id = ? AND rated_id = ?",
-            (rater_id, rated_id),
-        )
-        await db.execute(
-            "INSERT INTO ratings (rater_id, rated_id, rating) VALUES (?, ?, ?)",
-            (rater_id, rated_id, rating),
-        )
-        await db.commit()
-
-        cursor = await db.execute(
-            "SELECT AVG(rating) FROM ratings WHERE rated_id = ?", (rated_id,)
-        )
-        row = await cursor.fetchone()
-        avg = row[0] if row[0] is not None else 4.0
-
-        await db.execute(
-            "UPDATE users SET rating_avg = ? WHERE user_id = ?",
-            (round(avg, 1), rated_id),
-        )
-        await db.commit()
-
-        return is_new
-
-
-async def get_user_rating(user_id: int) -> Tuple[float, int]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT AVG(rating), COUNT(*) FROM ratings WHERE rated_id = ?", (user_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            avg = round(row[0], 1) if row[0] is not None else 4.0
-            count = row[1]
-            return avg, count
-
-
-async def adjust_rating(user_id: int, delta: float) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE users SET rating_avg = MIN(5.0, MAX(0.0, rating_avg + ?)) WHERE user_id = ?",
-            (delta, user_id),
-        )
-        await db.commit()
-
-
 async def add_support_ticket(
     user_id: int,
     category: str,
     text: str,
     media_type: Optional[str] = None,
     media_file_id: Optional[str] = None,
+    owner_message_id: Optional[int] = None,
 ) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            """INSERT INTO support_tickets (user_id, category, text, media_type, media_file_id)
-               VALUES (?, ?, ?, ?, ?)""",
-            (user_id, category, text, media_type, media_file_id),
+            """INSERT INTO support_tickets (user_id, category, text, media_type, media_file_id, owner_message_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, category, text, media_type, media_file_id, owner_message_id),
         ) as cursor:
             await db.commit()
             return cursor.lastrowid
@@ -424,6 +347,15 @@ async def update_ticket_text(ticket_id: int, new_text: str) -> None:
         await db.execute(
             "UPDATE support_tickets SET text = ? WHERE id = ?",
             (new_text, ticket_id),
+        )
+        await db.commit()
+
+
+async def update_ticket_owner_message_id(ticket_id: int, message_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_tickets SET owner_message_id = ? WHERE id = ?",
+            (message_id, ticket_id),
         )
         await db.commit()
 
