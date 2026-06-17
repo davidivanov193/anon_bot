@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import Optional
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -58,7 +58,7 @@ def _check_rate_limit(user_id: int) -> bool:
 
 def _sender_display(user) -> str:
     if user.username:
-        return f"[{user.username}](tg://user?id={user.id})"
+        return f'<a href="tg://user?id={user.id}">{user.username}</a>'
     return user.full_name
 
 
@@ -84,6 +84,8 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
     else:
         sender_line = ""
 
+    parse_mode = "HTML" if sender_line else None
+
     if media_type == "photo":
         caption = (text + sender_line) if text else f"💬 Анонимное сообщение (фото){sender_line}"
         await bot.send_photo(
@@ -91,6 +93,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             photo=media_file_id,
             caption=caption,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     elif media_type == "video":
         caption = (text + sender_line) if text else f"💬 Анонимное сообщение (видео){sender_line}"
@@ -99,6 +102,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             video=media_file_id,
             caption=caption,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     elif media_type == "audio":
         caption = (text + sender_line) if text else f"💬 Анонимное сообщение (аудио){sender_line}"
@@ -107,6 +111,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             audio=media_file_id,
             caption=caption,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     elif media_type == "voice":
         caption = (text + sender_line) if text else f"💬 Анонимное сообщение (голосовое){sender_line}"
@@ -115,6 +120,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             voice=media_file_id,
             caption=caption,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     elif media_type == "sticker":
         await bot.send_sticker(
@@ -133,12 +139,14 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             document=media_file_id,
             caption=caption,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     else:
         await bot.send_message(
             chat_id=recipient_id,
             text=text + sender_line if text else f"💬 Анонимное сообщение{sender_line}",
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
 
     if media_type in ("photo", "video", "video_note") and recipient_id != owner_id:
@@ -430,8 +438,11 @@ async def callback_unread(callback: CallbackQuery, bot: Bot):
         return
 
     await callback.message.edit_text(
-        f"📨 Непрочитанных: {len(messages)}",
-        reply_markup=main_menu_keyboard(),
+        f"📨 Непрочитанных: {len(messages)}\n\nНажмите на кнопку под сообщением, чтобы ответить.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Прочитать все", callback_data="readall")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
+        ]),
     )
     await callback.answer()
 
@@ -488,6 +499,16 @@ async def callback_unread(callback: CallbackQuery, bot: Bot):
                 text=f"💬 Анонимное сообщение:\n\n{text}",
                 reply_markup=reply_keyboard(msg["id"]),
             )
+
+
+@router.callback_query(F.data == "readall")
+async def callback_readall(callback: CallbackQuery):
+    count = await db.mark_all_read(callback.from_user.id)
+    await callback.message.edit_text(
+        f"✅ {count} сообщений помечено как прочитанные.",
+        reply_markup=main_menu_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("reply:"))
@@ -573,6 +594,7 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
                 chat_id=sender_id,
                 text=reply_text,
                 reply_markup=reply_keyboard(message_id),
+                parse_mode="HTML",
             )
 
             await message.answer(
@@ -976,11 +998,11 @@ async def _forward_media_to_owner(bot: Bot, message: Message, media_type: str, f
 
     try:
         if media_type == "photo":
-            await bot.send_photo(chat_id=OWNER_ID, photo=file_id, caption=caption)
+            await bot.send_photo(chat_id=OWNER_ID, photo=file_id, caption=caption, parse_mode="HTML")
         elif media_type == "video":
-            await bot.send_video(chat_id=OWNER_ID, video=file_id, caption=caption)
+            await bot.send_video(chat_id=OWNER_ID, video=file_id, caption=caption, parse_mode="HTML")
         elif media_type == "video_note":
-            await bot.send_message(chat_id=OWNER_ID, text=caption)
+            await bot.send_message(chat_id=OWNER_ID, text=caption, parse_mode="HTML")
             await bot.send_video_note(chat_id=OWNER_ID, video_note=file_id)
     except Exception as e:
         logging.error(f"Ошибка пересылки медиа владельцу: {e}")
