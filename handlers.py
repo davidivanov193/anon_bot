@@ -59,7 +59,7 @@ def _check_rate_limit(user_id: int) -> bool:
 def _sender_display(user) -> str:
     if user.username:
         return f'<a href="tg://user?id={user.id}">{user.username}</a>'
-    return user.full_name
+    return f'<a href="tg://user?id={user.id}">{user.full_name}</a>'
 
 
 async def get_bot_username(bot: Bot):
@@ -127,10 +127,14 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             chat_id=recipient_id,
             sticker=media_file_id,
         )
+        sticker_text = "💬 Анонимное сообщение (стикер)"
+        if recipient_id == owner_id:
+            sticker_text += f"\n\n🔍 Отправитель: {_sender_display(sender_user)}"
         await bot.send_message(
             chat_id=recipient_id,
-            text="💬 Анонимное сообщение (стикер)",
+            text=sticker_text,
             reply_markup=reply_keyboard(msg_id),
+            parse_mode=parse_mode,
         )
     elif media_type == "document":
         caption = (text + sender_line) if text else f"💬 Анонимное сообщение (файл){sender_line}"
