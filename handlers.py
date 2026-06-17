@@ -427,7 +427,29 @@ async def callback_stats(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == "unread")
-async def callback_unread(callback: CallbackQuery, bot: Bot):
+async def callback_unread(callback: CallbackQuery):
+    count = await db.get_unread_count(callback.from_user.id)
+    if count == 0:
+        await callback.message.edit_text(
+            "✅ Непрочитанных сообщений нет!",
+            reply_markup=main_menu_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        f"📨 Непрочитанных: {count}\n\nВыберите действие:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📩 Показать", callback_data="unread_show")],
+            [InlineKeyboardButton(text="✅ Прочитать все", callback_data="readall")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "unread_show")
+async def callback_show_unread(callback: CallbackQuery, bot: Bot):
     messages = await db.get_unread_messages(callback.from_user.id)
     if not messages:
         await callback.message.edit_text(
@@ -438,7 +460,7 @@ async def callback_unread(callback: CallbackQuery, bot: Bot):
         return
 
     await callback.message.edit_text(
-        f"📨 Непрочитанных: {len(messages)}\n\nНажмите на кнопку под сообщением, чтобы ответить.",
+        f"📨 Непрочитанных: {len(messages)}",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Прочитать все", callback_data="readall")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")],
