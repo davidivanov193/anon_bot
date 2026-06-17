@@ -212,6 +212,37 @@ async def mark_answered(message_id: int) -> bool:
         return cursor.rowcount > 0
 
 
+async def get_unread_messages(recipient_id: int) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM messages
+               WHERE recipient_id = ? AND is_answered = 0
+               ORDER BY created_at DESC""",
+            (recipient_id,),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
+async def get_unread_count(recipient_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM messages WHERE recipient_id = ? AND is_answered = 0",
+            (recipient_id,),
+        ) as cursor:
+            return (await cursor.fetchone())[0]
+
+
+async def mark_all_read(recipient_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE messages SET is_answered = 1 WHERE recipient_id = ? AND is_answered = 0",
+            (recipient_id,),
+        )
+        await db.commit()
+        return cursor.rowcount
+
+
 async def get_stats(user_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(

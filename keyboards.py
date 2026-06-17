@@ -42,6 +42,7 @@ def persistent_keyboard() -> ReplyKeyboardMarkup:
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=BTN.MY_LINK, callback_data="my_link")],
+        [InlineKeyboardButton(text="📨 Непрочитанные", callback_data="unread")],
         [InlineKeyboardButton(text=BTN.STATS, callback_data="stats")],
         [InlineKeyboardButton(text=BTN.UNBAN, callback_data="unban_menu")],
         [InlineKeyboardButton(text=BTN.SUPPORT, callback_data="support_menu")],

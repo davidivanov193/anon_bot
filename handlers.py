@@ -58,7 +58,7 @@ def _check_rate_limit(user_id: int) -> bool:
 
 def _sender_display(user) -> str:
     if user.username:
-        return f"@{user.username}"
+        return f"[{user.username}](tg://user?id={user.id})"
     return user.full_name
 
 
@@ -80,12 +80,12 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
     text = message.caption or message.text or ""
 
     if recipient_id == owner_id:
-        main_text = f"💬 Анонимное сообщение:\n\n{text}\n\n🔍 Отправитель: {_sender_display(sender_user)}"
+        sender_line = f"\n\n🔍 Отправитель: {_sender_display(sender_user)}"
     else:
-        main_text = f"💬 Анонимное сообщение:\n\n{text}"
+        sender_line = ""
 
     if media_type == "photo":
-        caption = main_text if text else "💬 Анонимное сообщение (фото)"
+        caption = (text + sender_line) if text else f"💬 Анонимное сообщение (фото){sender_line}"
         await bot.send_photo(
             chat_id=recipient_id,
             photo=media_file_id,
@@ -93,7 +93,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "video":
-        caption = main_text if text else "💬 Анонимное сообщение (видео)"
+        caption = (text + sender_line) if text else f"💬 Анонимное сообщение (видео){sender_line}"
         await bot.send_video(
             chat_id=recipient_id,
             video=media_file_id,
@@ -101,7 +101,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "audio":
-        caption = main_text if text else "💬 Анонимное сообщение (аудио)"
+        caption = (text + sender_line) if text else f"💬 Анонимное сообщение (аудио){sender_line}"
         await bot.send_audio(
             chat_id=recipient_id,
             audio=media_file_id,
@@ -109,7 +109,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "voice":
-        caption = main_text if text else "💬 Анонимное сообщение (голосовое)"
+        caption = (text + sender_line) if text else f"💬 Анонимное сообщение (голосовое){sender_line}"
         await bot.send_voice(
             chat_id=recipient_id,
             voice=media_file_id,
@@ -127,7 +127,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
             reply_markup=reply_keyboard(msg_id),
         )
     elif media_type == "document":
-        caption = main_text if text else "💬 Анонимное сообщение (файл)"
+        caption = (text + sender_line) if text else f"💬 Анонимное сообщение (файл){sender_line}"
         await bot.send_document(
             chat_id=recipient_id,
             document=media_file_id,
@@ -137,7 +137,7 @@ async def _forward_to_recipient(bot: Bot, recipient_id: int, message: Message,
     else:
         await bot.send_message(
             chat_id=recipient_id,
-            text=main_text,
+            text=text + sender_line if text else f"💬 Анонимное сообщение{sender_line}",
             reply_markup=reply_keyboard(msg_id),
         )
 
@@ -231,6 +231,12 @@ async def cmd_allstats(message: Message):
         f"🚫 Всего банов: {stats['total_bans']}\n"
         f"📩 Открытых тикетов: {stats['open_tickets']}",
     )
+
+
+@router.message(Command("readall"))
+async def cmd_readall(message: Message):
+    count = await db.mark_all_read(message.from_user.id)
+    await message.answer(f"✅ {count} сообщений помечено как прочитанные.")
 
 
 @router.message(SendState.waiting_for_message, F.text)
@@ -412,6 +418,78 @@ async def callback_stats(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "unread")
+async def callback_unread(callback: CallbackQuery, bot: Bot):
+    messages = await db.get_unread_messages(callback.from_user.id)
+    if not messages:
+        await callback.message.edit_text(
+            "✅ Непрочитанных сообщений нет!",
+            reply_markup=main_menu_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await callback.message.edit_text(
+        f"📨 Непрочитанных: {len(messages)}",
+        reply_markup=main_menu_keyboard(),
+    )
+    await callback.answer()
+
+    for msg in messages:
+        text = msg["text"] or ""
+        if msg["media_type"] == "photo":
+            await bot.send_photo(
+                chat_id=callback.from_user.id,
+                photo=msg["media_file_id"],
+                caption=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        elif msg["media_type"] == "video":
+            await bot.send_video(
+                chat_id=callback.from_user.id,
+                video=msg["media_file_id"],
+                caption=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        elif msg["media_type"] == "audio":
+            await bot.send_audio(
+                chat_id=callback.from_user.id,
+                audio=msg["media_file_id"],
+                caption=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        elif msg["media_type"] == "voice":
+            await bot.send_voice(
+                chat_id=callback.from_user.id,
+                voice=msg["media_file_id"],
+                caption=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        elif msg["media_type"] == "sticker":
+            await bot.send_sticker(
+                chat_id=callback.from_user.id,
+                sticker=msg["media_file_id"],
+            )
+            await bot.send_message(
+                chat_id=callback.from_user.id,
+                text="💬 Анонимное сообщение (стикер)",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        elif msg["media_type"] == "document":
+            await bot.send_document(
+                chat_id=callback.from_user.id,
+                document=msg["media_file_id"],
+                caption=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+        else:
+            await bot.send_message(
+                chat_id=callback.from_user.id,
+                text=f"💬 Анонимное сообщение:\n\n{text}",
+                reply_markup=reply_keyboard(msg["id"]),
+            )
+
+
 @router.callback_query(F.data.startswith("reply:"))
 async def callback_reply(callback: CallbackQuery, state: FSMContext):
     try:
@@ -501,6 +579,8 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
                 "✅ Ответ отправлен!",
                 reply_markup=reply_keyboard(message_id),
             )
+
+            await db.mark_answered(message_id)
         except Exception as e:
             logging.error(f"Ошибка отправки ответа пользователю {sender_id}: {e}")
             await message.answer("Не удалось отправить ответ. Возможно, пользователь заблокировал бота.")
