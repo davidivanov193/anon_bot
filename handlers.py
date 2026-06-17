@@ -191,7 +191,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
         await state.set_state(SendState.waiting_for_message)
         await message.answer(
             "Отправьте анонимное сообщение.\n"
-            "Можно: текст, фото, аудио, стикер, документ\n"
+            "Можно: текст, фото, видео, аудио, стикер, документ\n"
             f"Максимум: {MAX_MESSAGE_LENGTH} слов"
         )
         return
@@ -262,31 +262,61 @@ async def handle_text_message(message: Message, state: FSMContext, bot: Bot, own
 
 @router.message(SendState.waiting_for_message, F.photo)
 async def handle_photo_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     photo = message.photo[-1]
     await _process_send(message, state, bot, owner_id, text=message.caption or "",
                         media_type="photo", media_file_id=photo.file_id)
 
 
+@router.message(SendState.waiting_for_message, F.video)
+async def handle_video_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
+    await _process_send(message, state, bot, owner_id, text=message.caption or "",
+                        media_type="video", media_file_id=message.video.file_id)
+
+
 @router.message(SendState.waiting_for_message, F.audio)
 async def handle_audio_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     await _process_send(message, state, bot, owner_id, text=message.caption or "",
                         media_type="audio", media_file_id=message.audio.file_id)
 
 
 @router.message(SendState.waiting_for_message, F.voice)
 async def handle_voice_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     await _process_send(message, state, bot, owner_id, text=message.caption or "",
                         media_type="voice", media_file_id=message.voice.file_id)
 
 
 @router.message(SendState.waiting_for_message, F.sticker)
 async def handle_sticker_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     await _process_send(message, state, bot, owner_id, text="",
                         media_type="sticker", media_file_id=message.sticker.file_id)
 
 
 @router.message(SendState.waiting_for_message, F.document)
 async def handle_document_message(message: Message, state: FSMContext, bot: Bot, owner_id: int):
+    if message.text == "🏠 Меню":
+        await state.clear()
+        await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
+        return
     await _process_send(message, state, bot, owner_id, text=message.caption or "",
                         media_type="document", media_file_id=message.document.file_id)
 
@@ -373,7 +403,7 @@ async def callback_send_again(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SendState.waiting_for_message)
     await callback.message.answer(
         "Отправьте ещё одно анонимное сообщение.\n"
-        "Можно: текст, фото, аудио, стикер, документ\n"
+        "Можно: текст, фото, видео, аудио, стикер, документ\n"
         f"Максимум: {MAX_MESSAGE_LENGTH} слов"
     )
     await callback.answer()
@@ -557,12 +587,35 @@ async def callback_reply(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.message(ReplyState.waiting_for_reply, F.text)
+@router.message(ReplyState.waiting_for_reply)
 async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id: int):
     if message.text == "🏠 Меню":
         await state.clear()
         await message.answer("Главное меню:", reply_markup=main_menu_keyboard())
         return
+
+    reply_text = message.text or message.caption or ""
+    media_type = None
+    media_file_id = None
+
+    if message.photo:
+        media_type = "photo"
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_type = "video"
+        media_file_id = message.video.file_id
+    elif message.sticker:
+        media_type = "sticker"
+        media_file_id = message.sticker.file_id
+    elif message.document:
+        media_type = "document"
+        media_file_id = message.document.file_id
+    elif message.audio:
+        media_type = "audio"
+        media_file_id = message.audio.file_id
+    elif message.voice:
+        media_type = "voice"
+        media_file_id = message.voice.file_id
 
     data = await state.get_data()
     message_id = data.get("reply_message_id")
@@ -580,12 +633,61 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
             await state.clear()
             return
 
+        support_text = f"📩 Ответ поддержки:\n\n{reply_text}"
+
         try:
-            await bot.send_message(
-                chat_id=ticket["user_id"],
-                text=f"📩 Ответ поддержки:\n\n{message.text}",
-                reply_markup=user_support_keyboard(ticket_id=message_id),
-            )
+            if media_type == "photo":
+                await bot.send_photo(
+                    chat_id=ticket["user_id"],
+                    photo=media_file_id,
+                    caption=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            elif media_type == "video":
+                await bot.send_video(
+                    chat_id=ticket["user_id"],
+                    video=media_file_id,
+                    caption=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            elif media_type == "sticker":
+                await bot.send_sticker(
+                    chat_id=ticket["user_id"],
+                    sticker=media_file_id,
+                )
+                await bot.send_message(
+                    chat_id=ticket["user_id"],
+                    text=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            elif media_type == "document":
+                await bot.send_document(
+                    chat_id=ticket["user_id"],
+                    document=media_file_id,
+                    caption=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            elif media_type == "audio":
+                await bot.send_audio(
+                    chat_id=ticket["user_id"],
+                    audio=media_file_id,
+                    caption=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            elif media_type == "voice":
+                await bot.send_voice(
+                    chat_id=ticket["user_id"],
+                    voice=media_file_id,
+                    caption=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+            else:
+                await bot.send_message(
+                    chat_id=ticket["user_id"],
+                    text=support_text,
+                    reply_markup=user_support_keyboard(ticket_id=message_id),
+                )
+
             await message.answer(
                 "✅ Ответ отправлен!",
                 reply_markup=owner_close_keyboard(ticket_id=message_id),
@@ -607,21 +709,70 @@ async def process_reply(message: Message, state: FSMContext, bot: Bot, owner_id:
         sender_token = sender_row["token"] if sender_row else ""
 
         try:
-            reply_text = f"📨 Ответ на ваше анонимное сообщение:\n\n{message.text}"
+            reply_text = f"📨 Ответ на ваше анонимное сообщение:\n\n{reply_text}"
 
             replier = message.from_user
             if replier.id != owner_id:
                 reply_text += f"\n\n🔍 Ответил: {_sender_display(replier)}"
 
-            replier_row = await db.get_user(replier.id)
-            replier_token = replier_row["token"] if replier_row else ""
-
-            await bot.send_message(
-                chat_id=sender_id,
-                text=reply_text,
-                reply_markup=reply_keyboard(message_id),
-                parse_mode="HTML",
-            )
+            if media_type == "photo":
+                await bot.send_photo(
+                    chat_id=sender_id,
+                    photo=media_file_id,
+                    caption=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            elif media_type == "video":
+                await bot.send_video(
+                    chat_id=sender_id,
+                    video=media_file_id,
+                    caption=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            elif media_type == "sticker":
+                await bot.send_sticker(
+                    chat_id=sender_id,
+                    sticker=media_file_id,
+                )
+                await bot.send_message(
+                    chat_id=sender_id,
+                    text=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            elif media_type == "document":
+                await bot.send_document(
+                    chat_id=sender_id,
+                    document=media_file_id,
+                    caption=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            elif media_type == "audio":
+                await bot.send_audio(
+                    chat_id=sender_id,
+                    audio=media_file_id,
+                    caption=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            elif media_type == "voice":
+                await bot.send_voice(
+                    chat_id=sender_id,
+                    voice=media_file_id,
+                    caption=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=sender_id,
+                    text=reply_text,
+                    reply_markup=reply_keyboard(message_id),
+                    parse_mode="HTML",
+                )
 
             await message.answer(
                 "✅ Ответ отправлен!",
@@ -752,10 +903,10 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
     category = data.get("support_category")
 
     if category == "complaint":
-        if not message.photo:
+        if not message.photo and not message.video and not message.video_note:
             await message.answer(
-                "❌ Для жалоб обязательно приложите минимум 1 скриншот.\n"
-                "Отправьте сообщение повторно с фото."
+                "❌ Для жалоб обязательно приложите скриншот или видео.\n"
+                "Отправьте сообщение повторно с медиа."
             )
             return
 
@@ -772,6 +923,18 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
     elif message.video_note:
         media_type = "video_note"
         media_file_id = message.video_note.file_id
+    elif message.sticker:
+        media_type = "sticker"
+        media_file_id = message.sticker.file_id
+    elif message.audio:
+        media_type = "audio"
+        media_file_id = message.audio.file_id
+    elif message.voice:
+        media_type = "voice"
+        media_file_id = message.voice.file_id
+    elif message.document:
+        media_type = "document"
+        media_file_id = message.document.file_id
 
     category_names = {
         "bug": "🐛 Нашёл баг",
@@ -802,6 +965,7 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             photo=media_file_id,
             caption=owner_text,
             reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
         )
     elif media_type == "video":
         owner_msg = await bot.send_video(
@@ -809,6 +973,7 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             video=media_file_id,
             caption=owner_text,
             reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
         )
     elif media_type == "video_note":
         await bot.send_video_note(
@@ -819,12 +984,49 @@ async def process_support_message(message: Message, state: FSMContext, bot: Bot)
             chat_id=OWNER_ID,
             text=owner_text,
             reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
+        )
+    elif media_type == "sticker":
+        await bot.send_sticker(
+            chat_id=OWNER_ID,
+            sticker=media_file_id,
+        )
+        owner_msg = await bot.send_message(
+            chat_id=OWNER_ID,
+            text=owner_text,
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
+        )
+    elif media_type == "audio":
+        owner_msg = await bot.send_audio(
+            chat_id=OWNER_ID,
+            audio=media_file_id,
+            caption=owner_text,
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
+        )
+    elif media_type == "voice":
+        owner_msg = await bot.send_voice(
+            chat_id=OWNER_ID,
+            voice=media_file_id,
+            caption=owner_text,
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
+        )
+    elif media_type == "document":
+        owner_msg = await bot.send_document(
+            chat_id=OWNER_ID,
+            document=media_file_id,
+            caption=owner_text,
+            reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
         )
     else:
         owner_msg = await bot.send_message(
             chat_id=OWNER_ID,
             text=owner_text,
             reply_markup=owner_support_keyboard(ticket_id, status="open"),
+            parse_mode="HTML",
         )
 
     if owner_msg:
@@ -882,14 +1084,19 @@ async def process_support_append(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
-    await db.append_ticket_text(ticket_id, message.text or "")
+    append_text = message.text or message.caption or ""
+    if not append_text:
+        await message.answer("❌ Отправьте текст для дополнения.")
+        return
+
+    await db.append_ticket_text(ticket_id, append_text)
     await state.clear()
 
     ticket = await db.get_ticket(ticket_id)
     if ticket:
         await bot.send_message(
             chat_id=OWNER_ID,
-            text=f"➕ Дополнение к обращению #{ticket_id}:\n\n{message.text}",
+            text=f"➕ Дополнение к обращению #{ticket_id}:\n\n{append_text}",
         )
 
     await message.answer(
@@ -927,7 +1134,12 @@ async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
         await state.clear()
         return
 
-    await db.update_ticket_text(ticket_id, message.text or "")
+    edit_text = message.text or message.caption or ""
+    if not edit_text:
+        await message.answer("❌ Отправьте текст для редактирования.")
+        return
+
+    await db.update_ticket_text(ticket_id, edit_text)
     await state.clear()
 
     ticket = await db.get_ticket(ticket_id)
@@ -939,7 +1151,7 @@ async def process_support_edit(message: Message, state: FSMContext, bot: Bot):
 
     new_msg = await bot.send_message(
         chat_id=OWNER_ID,
-        text=f"✏️ Обращение #{ticket_id} (отредактировано):\n\n{message.text}",
+        text=f"✏️ Обращение #{ticket_id} (отредактировано):\n\n{edit_text}",
         reply_markup=owner_close_keyboard(ticket_id),
     )
     await db.update_ticket_owner_message_id(ticket_id, new_msg.message_id)
